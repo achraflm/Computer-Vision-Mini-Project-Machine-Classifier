@@ -9,11 +9,11 @@ import os
 # --- 1. CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Classification Industrielle - Achraf", layout="wide", page_icon="⚙️")
 
-# Tes paramètres fixes
+# Paramètres Roboflow
 API_KEY = "9FcisW7nvl380crhBt6e"
 PROJECT_ID = "usinage-1uqck"
 
-# --- 2. CHARGEMENT DU MODÈLE ---
+# --- 2. FONCTION DE CHARGEMENT DU MODÈLE ---
 @st.cache_resource
 def load_model(version):
     try:
@@ -27,7 +27,7 @@ def load_model(version):
 # --- 3. BARRE LATÉRALE (MENU) ---
 st.sidebar.title("🛠️ Menu Usinage")
 mode = st.sidebar.selectbox("Choisir le mode", ["Image Unique", "Dossier d'Images", "Vidéo"])
-version_n = st.sidebar.number_input("Version du modèle", min_value=1, value=2) # Par défaut V2
+version_n = st.sidebar.number_input("Version du modèle", min_value=1, value=2)
 
 model = load_model(version_n)
 
@@ -47,40 +47,34 @@ if model:
             col1.image(img, caption="Image source", use_container_width=True)
             
             if col2.button("🔍 Identifier la pièce"):
-                with st.spinner('Analyse...'):
-                    # Sauvegarde temporaire indispensable pour la classification
+                with st.spinner('Analyse en cours...'):
+                    # 1. Sauvegarde temporaire
                     temp_p = "predict_temp.jpg"
                     img.save(temp_p)
                     
-                    # Prediction
+                    # 2. Une seule prédiction (plus rapide)
                     res = model.predict(temp_p).json()
                     
-                    if res['predictions']:
-                        top = res['predictions'][0]
-                        col2.success(f"### Résultat : {top['class']}")
-                        col2.metric("Confiance", f"{top['confidence']:.2%}")
-                        col2.json(res)
+                    # 3. Analyse sécurisée des résultats
+                    predictions = res.get('predictions', [])
+                    
+                    if predictions:
+                        # On récupère le premier résultat (le plus probable)
+                        top = predictions[0] if isinstance(predictions, list) else predictions
+                        
+                        # Gestion flexible des noms de clés (class/label et confidence/score)
+                        nom_piece = top.get('class', top.get('label', 'Inconnu'))
+                        score = top.get('confidence', top.get('score', 0))
+                        
+                        # 4. Affichage des résultats
+                        col2.success(f"### Résultat : {nom_piece}")
+                        col2.metric("Niveau de Confiance", f"{score:.2%}")
+                        
+                        with col2.expander("Voir les détails techniques (JSON)"):
+                            st.json(res)
                     else:
-                        col2.warning("Aucune classe identifiée.")
-# --- ANALYSE SÉCURISÉE DES RÉSULTATS ---
-                res = model.predict(temp_p).json()
-                
-                # On vérifie si on a des prédictions
-                if 'predictions' in res and len(res['predictions']) > 0:
-                    # On prend la meilleure prédiction
-                    top = res['predictions'][0]
-                    
-                    # On cherche le nom de la classe (parfois c'est 'class', parfois 'label')
-                    nom_piece = top.get('class', top.get('label', 'Inconnu'))
-                    # On cherche la confiance (parfois c'est 'confidence', parfois 'score')
-                    score = top.get('confidence', top.get('score', 0))
-                    
-                    col2.success(f"### Résultat : {nom_piece}")
-                    col2.metric("Confiance", f"{score:.2%}")
-                
-                # Optionnel : Affiche le JSON brut en dessous pour débugger si besoin
-                with st.expander("Détails techniques (JSON)"):
-                    st.json(res)
+                        col2.warning("Le modèle n'a détecté aucune classe connue.")
+
     # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
         st.header("📁 Analyse par lot")
@@ -94,10 +88,13 @@ if model:
                 temp_p = f"batch_{i}.jpg"
                 img.save(temp_p)
                 
-                prediction = model.predict(temp_p).json()
-                label = prediction['predictions'][0]['class'] if prediction['predictions'] else "Inconnu"
+                res = model.predict(temp_p).json()
+                preds = res.get('predictions', [])
                 
-                grid[i % 3].image(img, caption=f"{f.name} ➡️ {label}", use_container_width=True)
+                if preds:
+                    top = preds[0] if isinstance(preds, list) else preds
+                    label = top.get('class', top.get('label', 'Inconnu'))
+                    grid[i % 3].image(img, caption=f"{f.name} ➡️ {label}", use_container_width=True)
 
     # --- MODE 3 : VIDÉO ---
     elif mode == "Vidéo":
@@ -115,14 +112,16 @@ if model:
                     ret, frame = vf.read()
                     if not ret: break
                     
-                    # Traitement de la frame
                     cv2.imwrite("frame_temp.jpg", frame)
-                    prediction = model.predict("frame_temp.jpg").json()
+                    res = model.predict("frame_temp.jpg").json()
+                    preds = res.get('predictions', [])
                     
-                    if prediction['predictions']:
-                        label = prediction['predictions'][0]['class']
-                        conf = prediction['predictions'][0]['confidence']
-                        # On écrit sur l'image
+                    if preds:
+                        top = preds[0] if isinstance(preds, list) else preds
+                        label = top.get('class', top.get('label', '...'))
+                        conf = top.get('confidence', top.get('score', 0))
+                        
+                        # Affichage sur la vidéo
                         text = f"{label} ({conf:.1%})"
                         cv2.putText(frame, text, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                     
@@ -130,4 +129,4 @@ if model:
                 vf.release()
 
 else:
-    st.error("❌ Impossible de charger le modèle. Vérifie que la version est 'Trained' sur Roboflow.")
+    st.error("❌ Impossible de charger le modèle. Vérifie ta connexion ou la version sur Roboflow.")
