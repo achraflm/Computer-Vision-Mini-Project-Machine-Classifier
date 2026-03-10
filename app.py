@@ -1,54 +1,66 @@
 import streamlit as st
 from roboflow import Roboflow
-import cv2
 import numpy as np
 from PIL import Image
 import os
 
 # --- 1. CONFIGURATION ---
-# IMPORTANT: Put your API Key in Streamlit Secrets or an Environment Variable
-ROBOFLOW_API_KEY = st.sidebar.text_input("Enter API KEY", type="password")
-PROJECT_ID = "usinage-1uqck" # Your project ID
-MODEL_VERSION = 1 # Change this if you have multiple versions
-
+st.set_page_config(page_title="Usinage Detection", layout="wide")
 st.title("🛠️ Usinage Detection Dashboard")
-st.write(f"Project ID: {PROJECT_ID}")
 
-# --- 2. ROBOFLOW LOGIC ---
+# Utilisation des Secrets Streamlit (recommandé) ou Sidebar
+ROBOFLOW_API_KEY = st.sidebar.text_input("Enter Roboflow API KEY", type="password")
+PROJECT_ID = "usinage-1uqck" 
+MODEL_VERSION = 1 
+
+# --- 2. CHARGEMENT DU MODÈLE (SÉCURISÉ) ---
+model = None
+
 if ROBOFLOW_API_KEY:
-    rf = Roboflow(api_key=ROBOFLOW_API_KEY)
-    project = rf.workspace().project(PROJECT_ID)
-    model = project.version(MODEL_VERSION).model
+    try:
+        rf = Roboflow(api_key=ROBOFLOW_API_KEY)
+        # On spécifie le workspace si nécessaire, sinon Roboflow prend le défaut
+        project = rf.workspace().project(PROJECT_ID)
+        model = project.version(MODEL_VERSION).model
+        st.sidebar.success("✅ Modèle chargé avec succès !")
+    except Exception as e:
+        st.sidebar.error(f"❌ Erreur de connexion : {e}")
 else:
-    st.warning("Please enter your Roboflow API Key in the sidebar to begin.")
+    st.warning("Veuillez entrer votre clé API dans la barre latérale.")
 
-# --- 3. FRONT-END UI ---
+# --- 3. INTERFACE ---
 uploaded_file = st.file_uploader("Upload a machining part image...", type=["jpg", "jpeg", "png"])
 
-if uploaded_file is not None and ROBOFLOW_API_KEY:
-    # Convert uploaded file to an image OpenCV can read
+if uploaded_file is not None:
     image = Image.open(uploaded_file)
     img_array = np.array(image)
     
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+    col1, col2 = st.columns(2)
     
-    if st.button("🔍 Run Detection"):
-        with st.spinner('Analyzing...'):
-            # Run Inference
-            # We save temporarily because Roboflow API likes file paths or numpy arrays
-            results = model.predict(img_array, confidence=40, overlap=30).json()
-            
-            # --- 4. DISPLAY RESULTS ---
-            predictions = results['predictions']
-            
-            if not predictions:
-                st.info("No objects detected.")
+    with col1:
+        st.image(image, caption="Image Originale", use_container_width=True)
+    
+    with col2:
+        if st.button("🔍 Run Detection"):
+            if model is None:
+                st.error("Le modèle n'est pas prêt. Vérifiez votre clé API.")
             else:
-                # Roboflow can also return a plotted image
-                # But here is how you see the raw data:
-                st.write(f"Detected {len(predictions)} objects:")
-                st.json(predictions)
-                
-                # Optional: Use Roboflow's built-in save to show the image with boxes
-                model.predict(img_array).save("prediction.jpg")
-                st.image("prediction.jpg", caption="Detection Results", use_container_width=True)
+                with st.spinner('Analyse en cours...'):
+                    # FIX: On simplifie l'appel pour éviter les erreurs d'arguments
+                    # On enlève 'overlap' qui peut varier selon le type de modèle
+                    prediction_res = model.predict(img_array, confidence=40)
+                    
+                    # 4. AFFICHAGE DES RÉSULTATS
+                    results_json = prediction_res.json()
+                    predictions = results_json.get('predictions', [])
+                    
+                    if not predictions:
+                        st.info("Aucun objet détecté.")
+                    else:
+                        st.success(f"{len(predictions)} objets détectés !")
+                        # Sauvegarde et affichage
+                        prediction_res.save("prediction.jpg")
+                        st.image("prediction.jpg", caption="Résultats", use_container_width=True)
+                        
+                        with st.expander("Voir les données JSON"):
+                            st.json(results_json)
