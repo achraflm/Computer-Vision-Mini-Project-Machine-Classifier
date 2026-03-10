@@ -15,7 +15,7 @@ st.set_page_config(
 
 # ❌ TES PARAMÈTRES (Vérifie bien la version sur Roboflow)
 API_KEY = "9FcisW7nvl380crhBt6e"
-PROJECT_ID = "usinage-1uqck"
+PROJECT_ID = "test-pz2em-ghj7h"
 MODEL_VERSION = 1 
 
 # --- 2. FONCTION DE CHARGEMENT DU MODÈLE ---
