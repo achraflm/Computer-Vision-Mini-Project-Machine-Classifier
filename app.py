@@ -6,116 +6,95 @@ from PIL import Image
 import tempfile
 import os
 
-# --- 1. CONFIGURATION DE LA PAGE ---
-st.set_page_config(
-    page_title="Détection Industrielle - Usinage",
-    page_icon="🛠️",
-    layout="wide"
-)
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Vision Artificielle - Usinage", layout="wide")
 
-# ❌ TES PARAMÈTRES (Vérifie bien la version sur Roboflow)
-API_KEY = "9FcisW7nvl380crhBt6e"
-PROJECT_ID = "test-pz2em-ghj7h"
-MODEL_VERSION = 1 
+# Tes identifiants Roboflow
+API_KEY = "9FcisW7nvl380crhBt6e" 
+ID_DETECTION = "test-pz2em-ghj7h"
+ID_CLASSIFICATION = "usinage-1uqck" # ID utilisé précédemment
 
-# --- 2. FONCTION DE CHARGEMENT DU MODÈLE ---
+# --- 2. FONCTION DE CHARGEMENT ---
 @st.cache_resource
-def load_roboflow_model(api_key, project_id, version):
+def load_model(project_id, version=1):
     try:
-        rf = Roboflow(api_key=api_key)
+        rf = Roboflow(api_key=API_KEY)
         project = rf.workspace().project(project_id)
-        model = project.version(version).model
-        return model
+        return project.version(version).model
     except Exception as e:
-        st.error(f"Erreur de connexion à Roboflow : {e}")
+        st.error(f"Erreur Roboflow ({project_id}): {e}")
         return None
 
-# Initialisation du modèle
-model = load_roboflow_model(API_KEY, PROJECT_ID, MODEL_VERSION)
+# --- 3. BARRE LATÉRALE (NAVIGATION) ---
+st.sidebar.title("🚀 Panneau de Contrôle")
+task_type = st.sidebar.radio("Choisir la tâche", ["Détection d'objets", "Classification"])
+app_mode = st.sidebar.selectbox("Mode d'entrée", ["Image Unique", "Dossier d'Images", "Vidéo"])
+conf_level = st.sidebar.slider("Confiance (%)", 0, 100, 40)
 
-# --- 3. BARRE LATÉRALE (SIDEBAR) ---
-st.sidebar.image("https://roboflow.com/images/roboflow-logo.png", width=200)
-st.sidebar.title("Configuration")
+# Sélection du bon ID projet
+current_id = ID_DETECTION if task_type == "Détection d'objets" else ID_CLASSIFICATION
+model = load_model(current_id)
 
-app_mode = st.sidebar.selectbox(
-    "Mode de détection", 
-    ["Image Unique", "Dossier d'Images", "Vidéo"]
-)
+st.title(f"🛠️ Application de {task_type}")
+st.write(f"ID Projet actif : `{current_id}`")
 
-conf_threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 40) / 100
-st.sidebar.info(f"Projet : {PROJECT_ID}\nVersion : {MODEL_VERSION}")
-
-# --- 4. LOGIQUE PRINCIPALE ---
-
-if model is None:
-    st.error("⚠️ Le modèle n'a pas pu être chargé. Vérifiez votre clé API et l'ID du projet.")
-else:
+# --- 4. LOGIQUE DE TRAITEMENT ---
+if model:
     # --- MODE : IMAGE UNIQUE ---
     if app_mode == "Image Unique":
-        st.header("📸 Analyse d'une Image Unique")
-        uploaded_file = st.file_uploader("Choisir une image...", type=["jpg", "jpeg", "png"])
-        
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            img_array = np.array(image)
-            
-            if st.button("Lancer la détection"):
-                with st.spinner('Détection en cours...'):
-                    # Prédiction
-                    prediction = model.predict(img_array, confidence=conf_threshold * 100)
-                    prediction.save("result.jpg")
-                    
-                    # Affichage
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.image(image, caption="Image Originale", use_container_width=True)
-                    with col2:
-                        st.image("result.jpg", caption="Résultat de Détection", use_container_width=True)
-                    
-                    st.subheader("Données JSON")
-                    st.json(prediction.json())
+        file = st.file_uploader("Charger une image", type=['jpg', 'jpeg', 'png'])
+        if file:
+            img = Image.open(file)
+            if st.button("Analyser"):
+                prediction = model.predict(np.array(img), confidence=conf_level)
+                
+                col1, col2 = st.columns(2)
+                col1.image(img, caption="Original", use_container_width=True)
+                
+                if task_type == "Détection d'objets":
+                    prediction.save("res.jpg")
+                    col2.image("res.jpg", caption="Détection", use_container_width=True)
+                else:
+                    # Pour la classification, on affiche les scores
+                    st.subheader("Résultats de Classification")
+                    st.write(prediction.json())
 
-    # --- MODE : DOSSIER D'IMAGES ---
+    # --- MODE : DOSSIER ---
     elif app_mode == "Dossier d'Images":
-        st.header("📁 Analyse par Lot (Dossier)")
-        uploaded_files = st.file_uploader("Sélectionnez plusieurs images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
-        
-        if uploaded_files and st.button("Analyser le dossier"):
-            st.write(f"Analyse de {len(uploaded_files)} images...")
-            cols = st.columns(3) # Affichage sur 3 colonnes
-            
-            for i, file in enumerate(uploaded_files):
-                img = Image.open(file)
-                pred = model.predict(np.array(img), confidence=conf_threshold * 100)
-                pred.save(f"temp_{i}.jpg")
-                cols[i % 3].image(f"temp_{i}.jpg", caption=file.name, use_container_width=True)
+        files = st.file_uploader("Charger plusieurs images", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+        if files and st.button("Lancer le lot"):
+            cols = st.columns(3)
+            for i, f in enumerate(files):
+                img = np.array(Image.open(f))
+                pred = model.predict(img, confidence=conf_level)
+                if task_type == "Détection d'objets":
+                    pred.save(f"batch_{i}.jpg")
+                    cols[i % 3].image(f"batch_{i}.jpg", caption=f.name)
+                else:
+                    top_class = pred.json()['predictions'][0]['class'] if pred.json()['predictions'] else "Inconnu"
+                    cols[i % 3].image(img, caption=f"Classe : {top_class}")
 
     # --- MODE : VIDÉO ---
     elif app_mode == "Vidéo":
-        st.header("🎥 Analyse Vidéo (Frame par Frame)")
-        video_file = st.file_uploader("Télécharger une vidéo", type=["mp4", "avi", "mov"])
-        
-        if video_file is not None:
-            # Créer un fichier temporaire pour la vidéo
+        v_file = st.file_uploader("Charger une vidéo", type=['mp4', 'mov', 'avi'])
+        if v_file:
             tfile = tempfile.NamedTemporaryFile(delete=False)
-            tfile.write(video_file.read())
-            
+            tfile.write(v_file.read())
             vf = cv2.VideoCapture(tfile.name)
-            st_frame = st.empty() # Cadre pour l'affichage dynamique
+            st_frame = st.empty()
             
             if st.button("Démarrer l'analyse"):
                 while vf.isOpened():
                     ret, frame = vf.read()
-                    if not ret:
-                        break
+                    if not ret: break
                     
-                    # Détection sur la frame actuelle
-                    # Note : L'appel API sur chaque frame peut être lent
-                    prediction = model.predict(frame, confidence=conf_threshold * 100)
-                    prediction.save("frame_res.jpg")
-                    
-                    # Affichage en temps réel
-                    st_frame.image("frame_res.jpg", caption="Analyse Vidéo en cours", use_container_width=True)
-                
+                    pred = model.predict(frame, confidence=conf_level)
+                    if task_type == "Détection d'objets":
+                        pred.save("v_frame.jpg")
+                        st_frame.image("v_frame.jpg", use_container_width=True)
+                    else:
+                        # Overlay texte pour classification
+                        top = pred.json()['predictions'][0]['class'] if pred.json()['predictions'] else "..."
+                        cv2.putText(frame, f"Classe: {top}", (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+                        st_frame.image(frame, channels="BGR", use_container_width=True)
                 vf.release()
-                st.success("Analyse terminée.")
