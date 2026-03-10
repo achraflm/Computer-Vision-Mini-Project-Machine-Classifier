@@ -22,25 +22,26 @@ def load_model(v):
         st.error(f"Erreur de connexion : {e}")
         return None
 
-# --- 2. BARRE LATÉRALE (Paramètres) ---
+# --- 2. BARRE LATÉRALE ---
 st.sidebar.title("🛠️ Configuration")
 mode = st.sidebar.selectbox("Mode", ["Image Unique", "Dossier d'Images", "Vidéo"])
 version_n = st.sidebar.number_input("Version", min_value=1, value=2)
 
-# 🎚️ AJOUT DU SLIDER DE SEUIL (THRESHOLD)
 st.sidebar.divider()
 st.sidebar.subheader("Sensibilité")
+# Le slider pour régler le seuil
 threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 50) / 100
 
 model = load_model(version_n)
 
 # --- 3. INTERFACE PRINCIPALE ---
-st.title("⚙️ Classification de Pièces d'Usinage")
+st.title("⚙️ Système de Classification de Pièces")
 
 if model:
-    # --- MODE IMAGE UNIQUE ---
     if mode == "Image Unique":
+        st.header("📸 Analyse d'une pièce")
         file = st.file_uploader("Charger une image", type=['jpg', 'jpeg', 'png'])
+        
         if file:
             img = Image.open(file)
             col1, col2 = st.columns(2)
@@ -50,31 +51,33 @@ if model:
                 temp_p = "temp_predict.jpg"
                 img.save(temp_p)
                 
-                # Récupération du JSON
-                response = model.predict(temp_p).json()
-                preds = response.get('predictions', [])
+                # --- RÉCUPÉRATION ET PARSING DU JSON ---
+                res = model.predict(temp_p).json()
                 
-                if preds:
-                    top = preds[0]
-                    confiance = top.get('confidence', 0)
-                    classe = top.get('class', 'Inconnu')
-                    
-                    # ⚖️ MANIPULATION DU SEUIL
+                # Extraction selon ta structure JSON précise
+                try:
+                    # On va chercher directement dans le premier élément de 'predictions'
+                    prediction_data = res['predictions'][0]
+                    classe_detectee = prediction_data['top']
+                    confiance = prediction_data['confidence']
+
+                    # --- LOGIQUE DE SEUIL ---
                     if confiance >= threshold:
-                        col2.success(f"### Pièce identifiée : **{classe}**")
+                        col2.success(f"### Résultat : **{classe_detectee}**")
                         col2.metric("Niveau de certitude", f"{confiance:.2%}")
                     else:
-                        col2.warning(f"⚠️ Résultat incertain ({confiance:.2%}). Le seuil est fixé à {threshold:.0%}.")
-                    
-                    # 📝 AFFICHAGE DU JSON
-                    st.divider()
-                    st.subheader("📄 Données brutes (JSON)")
-                    st.json(response)
-                else:
-                    col2.error("Aucune donnée reçue du modèle.")
+                        col2.warning(f"⚠️ Détection incertaine : {classe_detectee} ({confiance:.2%})")
+                        col2.info(f"Le seuil est actuellement réglé à {threshold*100:.0f}%")
+                
+                except (KeyError, IndexError):
+                    col2.error("Erreur de lecture des données JSON.")
 
-    # --- MODE DOSSIER ---
+                # Affichage des données brutes en dessous
+                with st.expander("📄 Voir le fichier JSON complet"):
+                    st.json(res)
+
     elif mode == "Dossier d'Images":
+        st.header("📁 Analyse par lot")
         files = st.file_uploader("Upload Dossier", accept_multiple_files=True)
         if files and st.button("Analyser le lot"):
             grid = st.columns(3)
@@ -83,17 +86,17 @@ if model:
                 temp_p = f"batch_{i}.jpg"
                 img.save(temp_p)
                 
-                res = model.predict(temp_p).json()
-                preds = res.get('predictions', [])
-                
-                if preds:
-                    top = preds[0]
-                    # On n'affiche l'étiquette que si elle dépasse le seuil
-                    label = top['class'] if top['confidence'] >= threshold else "❌ Sous le seuil"
+                data = model.predict(temp_p).json()
+                try:
+                    pred = data['predictions'][0]
+                    # On affiche la classe seulement si > seuil
+                    label = pred['top'] if pred['confidence'] >= threshold else "❌ Inconnu"
                     grid[i % 3].image(img, caption=f"{f.name} : {label}")
+                except:
+                    grid[i % 3].image(img, caption=f"{f.name} : Erreur")
 
-    # --- MODE VIDÉO ---
     elif mode == "Vidéo":
+        st.header("🎥 Analyse Vidéo")
         v_file = st.file_uploader("Charger Vidéo", type=['mp4', 'avi'])
         if v_file:
             tfile = tempfile.NamedTemporaryFile(delete=False)
@@ -107,12 +110,14 @@ if model:
                     if not ret: break
                     
                     cv2.imwrite("frame.jpg", frame)
-                    res = model.predict("frame.jpg").json()
-                    preds = res.get('predictions', [])
+                    data = model.predict("frame.jpg").json()
                     
-                    if preds and preds[0]['confidence'] >= threshold:
-                        text = f"{preds[0]['class']} ({preds[0]['confidence']:.1%})"
-                        cv2.putText(frame, text, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    try:
+                        pred = data['predictions'][0]
+                        if pred['confidence'] >= threshold:
+                            text = f"{pred['top']} ({pred['confidence']:.1%})"
+                            cv2.putText(frame, text, (30, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                    except: pass
                     
                     st_frame.image(frame, channels="BGR", use_container_width=True)
                 vf.release()
