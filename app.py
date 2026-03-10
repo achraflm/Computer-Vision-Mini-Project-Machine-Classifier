@@ -62,7 +62,25 @@ if model:
                         col2.json(res)
                     else:
                         col2.warning("Aucune classe identifiée.")
-
+# --- ANALYSE SÉCURISÉE DES RÉSULTATS ---
+                res = model.predict(temp_p).json()
+                
+                # On vérifie si on a des prédictions
+                if 'predictions' in res and len(res['predictions']) > 0:
+                    # On prend la meilleure prédiction
+                    top = res['predictions'][0]
+                    
+                    # On cherche le nom de la classe (parfois c'est 'class', parfois 'label')
+                    nom_piece = top.get('class', top.get('label', 'Inconnu'))
+                    # On cherche la confiance (parfois c'est 'confidence', parfois 'score')
+                    score = top.get('confidence', top.get('score', 0))
+                    
+                    col2.success(f"### Résultat : {nom_piece}")
+                    col2.metric("Confiance", f"{score:.2%}")
+                
+                # Optionnel : Affiche le JSON brut en dessous pour débugger si besoin
+                with st.expander("Détails techniques (JSON)"):
+                    st.json(res)
     # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
         st.header("📁 Analyse par lot")
