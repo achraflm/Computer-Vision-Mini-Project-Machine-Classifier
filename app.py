@@ -7,7 +7,7 @@ import os
 
 # --- 1. CONFIGURATION ---
 # IMPORTANT: Put your API Key in Streamlit Secrets or an Environment Variable
-ROBOFLOW_API_KEY = st.sidebar.text_input("9FcisW7nvl380crhBt6e", type="password")
+ROBOFLOW_API_KEY = st.sidebar.text_input("Enter API KEY", type="password")
 PROJECT_ID = "usinage-1uqck" # Your project ID
 MODEL_VERSION = 1 # Change this if you have multiple versions
 
