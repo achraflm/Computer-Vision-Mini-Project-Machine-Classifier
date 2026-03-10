@@ -1,66 +1,90 @@
 import streamlit as st
 from roboflow import Roboflow
+import cv2
 import numpy as np
 from PIL import Image
+import tempfile
 import os
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Usinage Detection", layout="wide")
-st.title("🛠️ Usinage Detection Dashboard")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Détection Industrielle - Usinage", layout="wide")
 
-# Utilisation des Secrets Streamlit (recommandé) ou Sidebar
-ROBOFLOW_API_KEY = st.sidebar.text_input("Enter Roboflow API KEY", type="password")
-PROJECT_ID = "usinage-1uqck" 
+# ❌ Tes informations (Remplies avec ce que tu m'as donné)
+PRIVATE_API_KEY = "9FcisW7nvl380crhBt6e"
+PROJECT_ID = "usinage-1uqck"
 MODEL_VERSION = 1 
 
-# --- 2. CHARGEMENT DU MODÈLE (SÉCURISÉ) ---
-model = None
+# Initialisation du modèle
+@st.cache_resource
+def load_model():
+    rf = Roboflow(api_key=PRIVATE_API_KEY)
+    project = rf.workspace().project(PROJECT_ID)
+    return project.version(MODEL_VERSION).model
 
-if ROBOFLOW_API_KEY:
-    try:
-        rf = Roboflow(api_key=ROBOFLOW_API_KEY)
-        # On spécifie le workspace si nécessaire, sinon Roboflow prend le défaut
-        project = rf.workspace().project(PROJECT_ID)
-        model = project.version(MODEL_VERSION).model
-        st.sidebar.success("✅ Modèle chargé avec succès !")
-    except Exception as e:
-        st.sidebar.error(f"❌ Erreur de connexion : {e}")
-else:
-    st.warning("Veuillez entrer votre clé API dans la barre latérale.")
+model = load_model()
 
-# --- 3. INTERFACE ---
-uploaded_file = st.file_uploader("Upload a machining part image...", type=["jpg", "jpeg", "png"])
+# --- SIDEBAR (MENU) ---
+st.sidebar.title("⚙️ Options de Détection")
+app_mode = st.sidebar.selectbox("Choisissez le mode", ["Image Unique", "Dossier d'Images", "Vidéo"])
+conf_threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 40)
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    img_array = np.array(image)
+# --- LOGIQUE DE DÉTECTION ---
+
+# --- MODE 1 : IMAGE UNIQUE ---
+if app_mode == "Image Unique":
+    st.header("📸 Analyse d'une Image")
+    file = st.file_uploader("Télécharger une image", type=['jpg', 'jpeg', 'png'])
     
-    col1, col2 = st.columns(2)
+    if file:
+        img = Image.open(file)
+        img_array = np.array(img)
+        
+        if st.button("Lancer la détection"):
+            with st.spinner("Analyse en cours..."):
+                prediction = model.predict(img_array, confidence=conf_threshold)
+                prediction.save("result.jpg")
+                
+                col1, col2 = st.columns(2)
+                col1.image(img, caption="Original", use_container_width=True)
+                col2.image("result.jpg", caption="Détecté", use_container_width=True)
+                st.json(prediction.json())
+
+# --- MODE 2 : DOSSIER D'IMAGES ---
+elif app_mode == "Dossier d'Images":
+    st.header("📁 Analyse par Lot (Batch)")
+    files = st.file_uploader("Sélectionnez plusieurs images", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
     
-    with col1:
-        st.image(image, caption="Image Originale", use_container_width=True)
+    if files and st.button("Analyser tout le dossier"):
+        cols = st.columns(3) # Affichage sur 3 colonnes
+        for i, file in enumerate(files):
+            img = Image.open(file)
+            prediction = model.predict(np.array(img), confidence=conf_threshold)
+            prediction.save(f"temp_{i}.jpg")
+            cols[i % 3].image(f"temp_{i}.jpg", caption=file.name, use_container_width=True)
+
+# --- MODE 3 : VIDÉO ---
+elif app_mode == "Vidéo":
+    st.header("🎥 Analyse Vidéo")
+    video_file = st.file_uploader("Télécharger une vidéo", type=['mp4', 'avi', 'mov'])
     
-    with col2:
-        if st.button("🔍 Run Detection"):
-            if model is None:
-                st.error("Le modèle n'est pas prêt. Vérifiez votre clé API.")
-            else:
-                with st.spinner('Analyse en cours...'):
-                    # FIX: On simplifie l'appel pour éviter les erreurs d'arguments
-                    # On enlève 'overlap' qui peut varier selon le type de modèle
-                    prediction_res = model.predict(img_array, confidence=40)
-                    
-                    # 4. AFFICHAGE DES RÉSULTATS
-                    results_json = prediction_res.json()
-                    predictions = results_json.get('predictions', [])
-                    
-                    if not predictions:
-                        st.info("Aucun objet détecté.")
-                    else:
-                        st.success(f"{len(predictions)} objets détectés !")
-                        # Sauvegarde et affichage
-                        prediction_res.save("prediction.jpg")
-                        st.image("prediction.jpg", caption="Résultats", use_container_width=True)
-                        
-                        with st.expander("Voir les données JSON"):
-                            st.json(results_json)
+    if video_file:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(video_file.read())
+        
+        vf = cv2.VideoCapture(tfile.name)
+        st_frame = st.empty() # Placeholder pour la vidéo en direct
+        
+        if st.button("Démarrer l'analyse vidéo"):
+            while vf.isOpened():
+                ret, frame = vf.read()
+                if not ret: break
+                
+                # Inference sur la frame
+                # Note: La vidéo peut être lente selon ta connexion internet
+                prediction = model.predict(frame, confidence=conf_threshold)
+                
+                # On dessine les résultats manuellement ou on utilise .save()
+                # Pour la vidéo, on affiche le JSON ou une image temporaire
+                prediction.save("frame_res.jpg")
+                st_frame.image("frame_res.jpg", channels="BGR")
+            vf.release()
