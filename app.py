@@ -7,108 +7,109 @@ import tempfile
 import os
 
 # --- 1. CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Vision Industrielle Achraf", layout="wide", page_icon="🔧")
+st.set_page_config(page_title="Classification Industrielle - Achraf", layout="wide", page_icon="⚙️")
 
-# Tes identifiants
+# Tes paramètres fixes
 API_KEY = "9FcisW7nvl380crhBt6e"
-ID_CLASSIFICATION = "usinage-1uqck"
-ID_DETECTION = "test-pz2em-ghj7h"
+PROJECT_ID = "usinage-1uqck"
 
-# --- 2. FONCTION DE CHARGEMENT ---
+# --- 2. CHARGEMENT DU MODÈLE ---
 @st.cache_resource
-def load_model(project_id, version):
+def load_model(version):
     try:
         rf = Roboflow(api_key=API_KEY)
-        project = rf.workspace().project(project_id)
+        project = rf.workspace().project(PROJECT_ID)
         return project.version(version).model
     except Exception as e:
-        st.error(f"Erreur de chargement : {e}")
+        st.error(f"Erreur Roboflow : {e}")
         return None
 
-# --- 3. SIDEBAR (NAVIGATION) ---
-st.sidebar.title("🚀 Contrôle")
-task = st.sidebar.radio("Tâche", ["Classification", "Détection d'objets"])
-mode = st.sidebar.selectbox("Mode d'entrée", ["Image Unique", "Dossier d'Images", "Vidéo"])
+# --- 3. BARRE LATÉRALE (MENU) ---
+st.sidebar.title("🛠️ Menu Usinage")
+mode = st.sidebar.selectbox("Choisir le mode", ["Image Unique", "Dossier d'Images", "Vidéo"])
+version_n = st.sidebar.number_input("Version du modèle", min_value=1, value=2) # Par défaut V2
 
-st.sidebar.divider()
-version = st.sidebar.number_input("Version du modèle", min_value=1, value=2) # V2 par défaut
-conf = st.sidebar.slider("Confiance (%)", 0, 100, 40)
-
-# Sélection du projet
-target_id = ID_CLASSIFICATION if task == "Classification" else ID_DETECTION
-model = load_model(target_id, version)
+model = load_model(version_n)
 
 # --- 4. INTERFACE PRINCIPALE ---
-st.title(f"🛠️ {task} - Projet `{target_id}`")
+st.title("⚙️ Système de Classification de Pièces")
+st.write(f"Projet actif : `{PROJECT_ID}` | Version : `{version_n}`")
 
 if model:
-    # --- MODE IMAGE UNIQUE ---
+    # --- MODE 1 : IMAGE UNIQUE ---
     if mode == "Image Unique":
+        st.header("📸 Analyse d'une pièce")
         file = st.file_uploader("Charger une image", type=['jpg', 'jpeg', 'png'])
+        
         if file:
             img = Image.open(file)
-            st.image(img, caption="Image source", width=400)
+            col1, col2 = st.columns(2)
+            col1.image(img, caption="Image source", use_container_width=True)
             
-            if st.button("Lancer l'Analyse"):
-                # FIX pour TypeError : Sauvegarde temporaire
-                temp_path = "temp_img.jpg"
-                img.save(temp_path)
-                
-                prediction = model.predict(temp_path, confidence=conf).json()
-                
-                if task == "Détection d'objets":
-                    model.predict(temp_path, confidence=conf).save("res.jpg")
-                    st.image("res.jpg", caption="Résultat Détection")
-                else:
-                    if prediction['predictions']:
-                        res = prediction['predictions'][0]
-                        st.success(f"Résultat : **{res['class']}** ({res['confidence']:.2%})")
-                    st.json(prediction)
+            if col2.button("🔍 Identifier la pièce"):
+                with st.spinner('Analyse...'):
+                    # Sauvegarde temporaire indispensable pour la classification
+                    temp_p = "predict_temp.jpg"
+                    img.save(temp_p)
+                    
+                    # Prediction
+                    res = model.predict(temp_p).json()
+                    
+                    if res['predictions']:
+                        top = res['predictions'][0]
+                        col2.success(f"### Résultat : {top['class']}")
+                        col2.metric("Confiance", f"{top['confidence']:.2%}")
+                        col2.json(res)
+                    else:
+                        col2.warning("Aucune classe identifiée.")
 
-    # --- MODE DOSSIER ---
+    # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
-        files = st.file_uploader("Charger plusieurs images", type=['jpg', 'png'], accept_multiple_files=True)
-        if files and st.button("Analyser le lot"):
-            cols = st.columns(3)
+        st.header("📁 Analyse par lot")
+        files = st.file_uploader("Sélectionner plusieurs images", type=['jpg', 'png'], accept_multiple_files=True)
+        
+        if files and st.button("Lancer l'analyse du lot"):
+            st.write(f"Traitement de {len(files)} images...")
+            grid = st.columns(3)
             for i, f in enumerate(files):
                 img = Image.open(f)
-                path = f"temp_{i}.jpg"
-                img.save(path)
+                temp_p = f"batch_{i}.jpg"
+                img.save(temp_p)
                 
-                pred = model.predict(path, confidence=conf).json()
-                if task == "Détection d'objets":
-                    model.predict(path, confidence=conf).save(f"out_{i}.jpg")
-                    cols[i % 3].image(f"out_{i}.jpg", caption=f.name)
-                else:
-                    label = pred['predictions'][0]['class'] if pred['predictions'] else "Inconnu"
-                    cols[i % 3].image(img, caption=f"{f.name}: {label}")
+                prediction = model.predict(temp_p).json()
+                label = prediction['predictions'][0]['class'] if prediction['predictions'] else "Inconnu"
+                
+                grid[i % 3].image(img, caption=f"{f.name} ➡️ {label}", use_container_width=True)
 
-    # --- MODE VIDÉO ---
+    # --- MODE 3 : VIDÉO ---
     elif mode == "Vidéo":
-        v_file = st.file_uploader("Charger une vidéo", type=['mp4', 'mov', 'avi'])
+        st.header("🎥 Analyse vidéo en temps réel")
+        v_file = st.file_uploader("Charger une vidéo", type=['mp4', 'avi', 'mov'])
+        
         if v_file:
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(v_file.read())
             vf = cv2.VideoCapture(tfile.name)
             st_frame = st.empty()
             
-            if st.button("Démarrer la vidéo"):
+            if st.button("Démarrer la lecture"):
                 while vf.isOpened():
                     ret, frame = vf.read()
                     if not ret: break
                     
-                    # On enregistre la frame pour éviter le TypeError
-                    cv2.imwrite("frame.jpg", frame)
-                    pred = model.predict("frame.jpg", confidence=conf).json()
+                    # Traitement de la frame
+                    cv2.imwrite("frame_temp.jpg", frame)
+                    prediction = model.predict("frame_temp.jpg").json()
                     
-                    if task == "Détection d'objets":
-                        model.predict("frame.jpg", confidence=conf).save("frame_res.jpg")
-                        st_frame.image("frame_res.jpg")
-                    else:
-                        label = pred['predictions'][0]['class'] if pred['predictions'] else "..."
-                        cv2.putText(frame, label, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                        st_frame.image(frame, channels="BGR")
+                    if prediction['predictions']:
+                        label = prediction['predictions'][0]['class']
+                        conf = prediction['predictions'][0]['confidence']
+                        # On écrit sur l'image
+                        text = f"{label} ({conf:.1%})"
+                        cv2.putText(frame, text, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    
+                    st_frame.image(frame, channels="BGR", use_container_width=True)
                 vf.release()
 
 else:
-    st.error("Le modèle n'a pas pu être chargé. Vérifie ta clé API et la version sur Roboflow.")
+    st.error("❌ Impossible de charger le modèle. Vérifie que la version est 'Trained' sur Roboflow.")
