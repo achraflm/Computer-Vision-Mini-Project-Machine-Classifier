@@ -6,12 +6,11 @@ from PIL import Image
 import tempfile
 import os
 
-# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="IA Usinage - Version Finale", layout="wide", page_icon="⚙️")
 
 API_KEY = "9FcisW7nvl380crhBt6e"
 PROJECT_ID = "usinage-1uqck"
-VERSION = 2  # Fixé sur la version 2 comme demandé
+VERSION = 2  
 
 @st.cache_resource
 def load_model():
@@ -23,7 +22,6 @@ def load_model():
         st.error(f"Erreur de chargement du modèle : {e}")
         return None
 
-# --- 2. BARRE LATÉRALE ---
 st.sidebar.title("🛠️ Menu de Contrôle")
 mode = st.sidebar.selectbox("Mode d'analyse", ["Image Unique", "Dossier d'Images", "Vidéo"])
 
@@ -33,12 +31,10 @@ threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 50) / 100
 
 model = load_model()
 
-# --- 3. INTERFACE PRINCIPALE ---
 st.title("⚙️ Classification Industrielle")
 st.info(f"Modèle : `{PROJECT_ID}` | Version : `{VERSION}`")
 
 if model:
-    # --- MODE 1 : IMAGE UNIQUE ---
     if mode == "Image Unique":
         file = st.file_uploader("Charger une image", type=['jpg', 'jpeg', 'png'])
         if file:
@@ -55,7 +51,6 @@ if model:
                 
                 if preds:
                     top_data = preds[0]
-                    # Extraction selon ton JSON (clé 'top' et 'confidence')
                     classe = top_data.get('top', 'Inconnu')
                     conf = top_data.get('confidence', 0)
                     
@@ -69,7 +64,6 @@ if model:
                     with st.expander("📄 Voir le fichier JSON complet"):
                         st.json(res)
 
-    # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
         st.header("📁 Analyse par lot")
         files = st.file_uploader("Sélectionner des images", accept_multiple_files=True, type=['jpg', 'png', 'jpeg'])
@@ -89,7 +83,6 @@ if model:
                     label = top.get('top', '???') if top.get('confidence', 0) >= threshold else "❌ Incertain"
                     grid[i % 3].image(img, caption=f"{f.name} : {label}", use_container_width=True)
 
-    # --- MODE 3 : VIDÉO ---
     elif mode == "Vidéo":
         st.header("🎥 Analyse Vidéo Stabilisée")
         v_file = st.file_uploader("Charger une vidéo", type=['mp4', 'avi', 'mov'])
@@ -99,7 +92,6 @@ if model:
             tfile.write(v_file.read())
             vf = cv2.VideoCapture(tfile.name)
             
-            # Conteneur fixe pour éviter les oscillations de l'interface
             video_placeholder = st.empty()
             btn_stop = st.button("Arrêter l'analyse")
 
@@ -112,7 +104,6 @@ if model:
                 
                 frame_count += 1
                 
-                # Optimisation : On analyse 1 image sur 5 pour plus de fluidité
                 if frame_count % 5 == 0:
                     cv2.imwrite("frame_temp.jpg", frame)
                     data = model.predict("frame_temp.jpg").json()
@@ -125,10 +116,8 @@ if model:
                         else:
                             last_label = "Sous le seuil de confiance"
 
-                # On écrit le texte sur l'image (couleur verte)
                 cv2.putText(frame, last_label, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
                 
-                # Mise à jour fluide de l'image
                 video_placeholder.image(frame, channels="BGR", use_container_width=True)
             
             vf.release()
