@@ -37,7 +37,7 @@ model = load_model()
 st.title(f"🛠️ Système Expert Vision : {task_type}")
 st.write(f"ID Projet : `{PROJECT_ID}` | Version : `{VERSION}`")
 
-[Image of object detection vs image classification]
+
 
 if model:
     # --- MODE 1 : IMAGE UNIQUE ---
