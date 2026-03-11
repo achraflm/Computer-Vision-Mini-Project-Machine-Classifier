@@ -7,41 +7,35 @@ import tempfile
 import os
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="IA Industrielle Achraf", layout="wide", page_icon="🛠️")
+st.set_page_config(page_title="IA Usinage - Version Finale", layout="wide", page_icon="⚙️")
 
 API_KEY = "9FcisW7nvl380crhBt6e"
-ID_CLASSIFICATION = "usinage-1uqck"
-ID_DETECTION = "test-pz2em-ghj7h"
-VERSION = 2  # Fixé sur la version 2
+PROJECT_ID = "usinage-1uqck"
+VERSION = 2  # Fixé sur la version 2 comme demandé
 
 @st.cache_resource
-def load_model(project_id):
+def load_model():
     try:
         rf = Roboflow(api_key=API_KEY)
-        project = rf.workspace().project(project_id)
+        project = rf.workspace().project(PROJECT_ID)
         return project.version(VERSION).model
     except Exception as e:
-        st.error(f"Erreur de chargement ({project_id}) : {e}")
+        st.error(f"Erreur de chargement du modèle : {e}")
         return None
 
 # --- 2. BARRE LATÉRALE ---
-st.sidebar.title("🎮 Panneau de Contrôle")
-task = st.sidebar.radio("Choisir la tâche", ["Classification", "Détection d'objets"])
-mode = st.sidebar.selectbox("Mode d'entrée", ["Image Unique", "Dossier d'Images", "Vidéo"])
+st.sidebar.title("🛠️ Menu de Contrôle")
+mode = st.sidebar.selectbox("Mode d'analyse", ["Image Unique", "Dossier d'Images", "Vidéo"])
 
 st.sidebar.divider()
 st.sidebar.subheader("Réglages")
 threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 50) / 100
 
-# Chargement du modèle correspondant
-current_id = ID_CLASSIFICATION if task == "Classification" else ID_DETECTION
-model = load_model(current_id)
+model = load_model()
 
 # --- 3. INTERFACE PRINCIPALE ---
-st.title(f"🚀 Système de {task}")
-st.info(f"Projet : `{current_id}` | Version : `{VERSION}`")
-
-
+st.title("⚙️ Classification Industrielle")
+st.info(f"Modèle : `{PROJECT_ID}` | Version : `{VERSION}`")
 
 if model:
     # --- MODE 1 : IMAGE UNIQUE ---
@@ -50,87 +44,93 @@ if model:
         if file:
             img = Image.open(file)
             col1, col2 = st.columns(2)
-            col1.image(img, caption="Source", use_container_width=True)
+            col1.image(img, caption="Pièce à analyser", use_container_width=True)
             
-            if col2.button("🔍 Analyser"):
+            if col2.button("🔍 Lancer l'Analyse"):
                 temp_p = "predict_temp.jpg"
                 img.save(temp_p)
                 
-                if task == "Classification":
-                    # Logique Classification (utilise 'top')
-                    res = model.predict(temp_p).json()
-                    preds = res.get('predictions', [])
-                    if preds:
-                        top = preds[0]
-                        if top.get('confidence', 0) >= threshold:
-                            col2.success(f"### Pièce : **{top.get('top')}**")
-                            col2.metric("Confiance", f"{top.get('confidence'):.2%}")
-                        else:
-                            col2.warning("Résultat sous le seuil de confiance.")
-                    st.json(res)
-                else:
-                    # Logique Détection (utilise 'class' et dessine des boîtes)
-                    prediction = model.predict(temp_p, confidence=threshold*100)
-                    prediction.save("res_detect.jpg")
-                    col2.image("res_detect.jpg", caption="Objets Détectés")
-                    st.json(prediction.json())
+                res = model.predict(temp_p).json()
+                preds = res.get('predictions', [])
+                
+                if preds:
+                    top_data = preds[0]
+                    # Extraction selon ton JSON (clé 'top' et 'confidence')
+                    classe = top_data.get('top', 'Inconnu')
+                    conf = top_data.get('confidence', 0)
+                    
+                    if conf >= threshold:
+                        col2.success(f"### Résultat : **{classe}**")
+                        col2.metric("Confiance", f"{conf:.2%}")
+                    else:
+                        col2.warning(f"⚠️ Confiance trop faible : {classe} ({conf:.1%})")
+                    
+                    st.divider()
+                    with st.expander("📄 Voir le fichier JSON complet"):
+                        st.json(res)
 
     # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
-        files = st.file_uploader("Upload Dossier", accept_multiple_files=True)
-        if files and st.button("Lancer le lot"):
+        st.header("📁 Analyse par lot")
+        files = st.file_uploader("Sélectionner des images", accept_multiple_files=True, type=['jpg', 'png', 'jpeg'])
+        
+        if files and st.button("Analyser le dossier"):
             grid = st.columns(3)
             for i, f in enumerate(files):
                 img = Image.open(f)
                 temp_p = f"batch_{i}.jpg"
                 img.save(temp_p)
                 
-                if task == "Classification":
-                    data = model.predict(temp_p).json()
-                    preds = data.get('predictions', [])
-                    label = preds[0].get('top') if preds and preds[0].get('confidence', 0) >= threshold else "❌"
-                    grid[i % 3].image(img, caption=f"{f.name} : {label}")
-                else:
-                    pred = model.predict(temp_p, confidence=threshold*100)
-                    pred.save(f"out_{i}.jpg")
-                    grid[i % 3].image(f"out_{i}.jpg", caption=f.name)
+                data = model.predict(temp_p).json()
+                preds = data.get('predictions', [])
+                
+                if preds:
+                    top = preds[0]
+                    label = top.get('top', '???') if top.get('confidence', 0) >= threshold else "❌ Incertain"
+                    grid[i % 3].image(img, caption=f"{f.name} : {label}", use_container_width=True)
 
     # --- MODE 3 : VIDÉO ---
     elif mode == "Vidéo":
-        v_file = st.file_uploader("Charger Vidéo", type=['mp4', 'avi'])
+        st.header("🎥 Analyse Vidéo Stabilisée")
+        v_file = st.file_uploader("Charger une vidéo", type=['mp4', 'avi', 'mov'])
+        
         if v_file:
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(v_file.read())
             vf = cv2.VideoCapture(tfile.name)
-            placeholder = st.empty()
             
-            last_text = "Analyse..."
-            f_count = 0
+            # Conteneur fixe pour éviter les oscillations de l'interface
+            video_placeholder = st.empty()
+            btn_stop = st.button("Arrêter l'analyse")
 
-            if st.button("Démarrer"):
-                while vf.isOpened():
-                    ret, frame = vf.read()
-                    if not ret: break
-                    f_count += 1
+            last_label = "Initialisation..."
+            frame_count = 0
+
+            while vf.isOpened():
+                ret, frame = vf.read()
+                if not ret or btn_stop: break
+                
+                frame_count += 1
+                
+                # Optimisation : On analyse 1 image sur 5 pour plus de fluidité
+                if frame_count % 5 == 0:
+                    cv2.imwrite("frame_temp.jpg", frame)
+                    data = model.predict("frame_temp.jpg").json()
+                    preds = data.get('predictions', [])
                     
-                    if f_count % 5 == 0:
-                        cv2.imwrite("frame.jpg", frame)
-                        if task == "Classification":
-                            res = model.predict("frame.jpg").json()
-                            preds = res.get('predictions', [])
-                            if preds and preds[0].get('confidence', 0) >= threshold:
-                                last_text = f"{preds[0].get('top')} ({preds[0].get('confidence'):.1%})"
+                    if preds:
+                        top = preds[0]
+                        if top.get('confidence', 0) >= threshold:
+                            last_label = f"{top.get('top')} ({top.get('confidence'):.1%})"
                         else:
-                            # Détection sur vidéo (on récupère les données JSON pour l'affichage texte)
-                            res = model.predict("frame.jpg", confidence=threshold*100).json()
-                            preds = res.get('predictions', [])
-                            last_text = f"{len(preds)} objets détectés"
-                            # Pour la détection, on peut aussi sauvegarder l'image avec boîtes
-                            model.predict("frame.jpg", confidence=threshold*100).save("frame_res.jpg")
-                            frame = cv2.imread("frame_res.jpg")
+                            last_label = "Sous le seuil de confiance"
 
-                    if task == "Classification":
-                        cv2.putText(frame, last_text, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-                    
-                    placeholder.image(frame, channels="BGR", use_container_width=True)
-                vf.release()
+                # On écrit le texte sur l'image (couleur verte)
+                cv2.putText(frame, last_label, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                
+                # Mise à jour fluide de l'image
+                video_placeholder.image(frame, channels="BGR", use_container_width=True)
+            
+            vf.release()
+else:
+    st.error("❌ Le modèle Version 2 n'a pas pu être chargé. Vérifiez l'entraînement sur Roboflow.")
