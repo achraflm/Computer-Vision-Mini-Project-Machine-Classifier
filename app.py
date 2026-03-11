@@ -7,40 +7,44 @@ import tempfile
 import os
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="IA Industrielle Unifiée", layout="wide", page_icon="⚙️")
+st.set_page_config(page_title="IA Industrielle Achraf", layout="wide", page_icon="🛠️")
 
-# ❌ UN SEUL ID POUR TOUT
 API_KEY = "9FcisW7nvl380crhBt6e"
-PROJECT_ID = "test-pz2em-ghj7h" 
-VERSION = 2
+ID_CLASSIFICATION = "usinage-1uqck"
+ID_DETECTION = "test-pz2em-ghj7h"
+VERSION = 2  # Fixé sur la version 2
 
 @st.cache_resource
-def load_unified_model():
+def load_model(project_id):
     try:
         rf = Roboflow(api_key=API_KEY)
-        project = rf.workspace().project(PROJECT_ID)
+        project = rf.workspace().project(project_id)
         return project.version(VERSION).model
     except Exception as e:
-        st.error(f"Erreur de connexion au projet {PROJECT_ID} : {e}")
+        st.error(f"Erreur de chargement ({project_id}) : {e}")
         return None
 
 # --- 2. BARRE LATÉRALE ---
-st.sidebar.title("🎮 Contrôle Unique")
-# L'utilisateur choisit comment interpréter les données du modèle
-task = st.sidebar.radio("Mode d'affichage", ["Détection (Boîtes)", "Classification (Texte seul)"])
-mode = st.sidebar.selectbox("Source", ["Image Unique", "Dossier d'Images", "Vidéo"])
+st.sidebar.title("🎮 Panneau de Contrôle")
+task = st.sidebar.radio("Choisir la tâche", ["Classification", "Détection d'objets"])
+mode = st.sidebar.selectbox("Mode d'entrée", ["Image Unique", "Dossier d'Images", "Vidéo"])
 
 st.sidebar.divider()
-threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 50)
+st.sidebar.subheader("Réglages")
+threshold = st.sidebar.slider("Seuil de Confiance (%)", 0, 100, 50) / 100
 
-model = load_unified_model()
+# Chargement du modèle correspondant
+current_id = ID_CLASSIFICATION if task == "Classification" else ID_DETECTION
+model = load_model(current_id)
 
 # --- 3. INTERFACE PRINCIPALE ---
-st.title(f"🛠️ Analyse Industrielle : {PROJECT_ID}")
-st.caption(f"Utilisation du modèle de détection pour la {task.lower()}")
+st.title(f"🚀 Système de {task}")
+st.info(f"Projet : `{current_id}` | Version : `{VERSION}`")
+
+
 
 if model:
-    # --- MODE IMAGE UNIQUE ---
+    # --- MODE 1 : IMAGE UNIQUE ---
     if mode == "Image Unique":
         file = st.file_uploader("Charger une image", type=['jpg', 'jpeg', 'png'])
         if file:
@@ -48,50 +52,50 @@ if model:
             col1, col2 = st.columns(2)
             col1.image(img, caption="Source", use_container_width=True)
             
-            if col2.button("🚀 Lancer l'Analyse"):
-                temp_p = "unified_predict.jpg"
+            if col2.button("🔍 Analyser"):
+                temp_p = "predict_temp.jpg"
                 img.save(temp_p)
                 
-                # Exécution de la prédiction
-                prediction = model.predict(temp_p, confidence=threshold)
-                
-                if task == "Détection (Boîtes)":
-                    prediction.save("res_detect.jpg")
-                    col2.image("res_detect.jpg", caption="Résultat avec Bounding Boxes")
-                else:
-                    # On transforme la détection en classification
-                    # On prend l'objet avec la plus haute confiance
-                    preds = prediction.json().get('predictions', [])
+                if task == "Classification":
+                    # Logique Classification (utilise 'top')
+                    res = model.predict(temp_p).json()
+                    preds = res.get('predictions', [])
                     if preds:
-                        top = preds[0] # Le premier est souvent le plus confiant
-                        col2.success(f"### Classe détectée : **{top['class']}**")
-                        col2.metric("Confiance", f"{top['confidence']:.2%}")
-                    else:
-                        col2.warning("Aucun objet détecté au-dessus du seuil.")
-                
-                with st.expander("🔍 Voir les données JSON"):
+                        top = preds[0]
+                        if top.get('confidence', 0) >= threshold:
+                            col2.success(f"### Pièce : **{top.get('top')}**")
+                            col2.metric("Confiance", f"{top.get('confidence'):.2%}")
+                        else:
+                            col2.warning("Résultat sous le seuil de confiance.")
+                    st.json(res)
+                else:
+                    # Logique Détection (utilise 'class' et dessine des boîtes)
+                    prediction = model.predict(temp_p, confidence=threshold*100)
+                    prediction.save("res_detect.jpg")
+                    col2.image("res_detect.jpg", caption="Objets Détectés")
                     st.json(prediction.json())
 
-    # --- MODE DOSSIER ---
+    # --- MODE 2 : DOSSIER D'IMAGES ---
     elif mode == "Dossier d'Images":
         files = st.file_uploader("Upload Dossier", accept_multiple_files=True)
-        if files and st.button("Analyser le lot"):
+        if files and st.button("Lancer le lot"):
             grid = st.columns(3)
             for i, f in enumerate(files):
                 img = Image.open(f)
-                path = f"batch_{i}.jpg"
-                img.save(path)
+                temp_p = f"batch_{i}.jpg"
+                img.save(temp_p)
                 
-                prediction = model.predict(path, confidence=threshold)
-                if task == "Détection (Boîtes)":
-                    prediction.save(f"out_{i}.jpg")
-                    grid[i % 3].image(f"out_{i}.jpg", caption=f.name)
-                else:
-                    preds = prediction.json().get('predictions', [])
-                    label = preds[0]['class'] if preds else "Inconnu"
+                if task == "Classification":
+                    data = model.predict(temp_p).json()
+                    preds = data.get('predictions', [])
+                    label = preds[0].get('top') if preds and preds[0].get('confidence', 0) >= threshold else "❌"
                     grid[i % 3].image(img, caption=f"{f.name} : {label}")
+                else:
+                    pred = model.predict(temp_p, confidence=threshold*100)
+                    pred.save(f"out_{i}.jpg")
+                    grid[i % 3].image(f"out_{i}.jpg", caption=f.name)
 
-    # --- MODE VIDÉO ---
+    # --- MODE 3 : VIDÉO ---
     elif mode == "Vidéo":
         v_file = st.file_uploader("Charger Vidéo", type=['mp4', 'avi'])
         if v_file:
@@ -100,10 +104,10 @@ if model:
             vf = cv2.VideoCapture(tfile.name)
             placeholder = st.empty()
             
-            f_count = 0
             last_text = "Analyse..."
+            f_count = 0
 
-            if st.button("Démarrer la Vidéo"):
+            if st.button("Démarrer"):
                 while vf.isOpened():
                     ret, frame = vf.read()
                     if not ret: break
@@ -111,16 +115,21 @@ if model:
                     
                     if f_count % 5 == 0:
                         cv2.imwrite("frame.jpg", frame)
-                        prediction = model.predict("frame.jpg", confidence=threshold)
-                        
-                        if task == "Détection (Boîtes)":
-                            prediction.save("frame_res.jpg")
-                            frame = cv2.imread("frame_res.jpg")
+                        if task == "Classification":
+                            res = model.predict("frame.jpg").json()
+                            preds = res.get('predictions', [])
+                            if preds and preds[0].get('confidence', 0) >= threshold:
+                                last_text = f"{preds[0].get('top')} ({preds[0].get('confidence'):.1%})"
                         else:
-                            preds = prediction.json().get('predictions', [])
-                            last_text = f"{preds[0]['class']} ({preds[0]['confidence']:.1%})" if preds else "..."
-                    
-                    if task == "Classification (Texte seul)":
+                            # Détection sur vidéo (on récupère les données JSON pour l'affichage texte)
+                            res = model.predict("frame.jpg", confidence=threshold*100).json()
+                            preds = res.get('predictions', [])
+                            last_text = f"{len(preds)} objets détectés"
+                            # Pour la détection, on peut aussi sauvegarder l'image avec boîtes
+                            model.predict("frame.jpg", confidence=threshold*100).save("frame_res.jpg")
+                            frame = cv2.imread("frame_res.jpg")
+
+                    if task == "Classification":
                         cv2.putText(frame, last_text, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
                     
                     placeholder.image(frame, channels="BGR", use_container_width=True)
